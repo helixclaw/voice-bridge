@@ -44,8 +44,9 @@ const pipeline = new Pipeline({
   onTranscription: (userId, text) => {
     console.log(`[STT] ${userId}: ${text}`);
   },
-  onAIResponse: (text) => {
-    console.log(`[AI] ${text}`);
+  onAIResponse: ({ text, voice }) => {
+    console.log(`[AI:text] ${text}`);
+    console.log(`[AI:voice] ${voice}`);
   },
   onError: (err) => {
     console.error(`[Pipeline Error]`, err);

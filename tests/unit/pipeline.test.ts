@@ -6,6 +6,7 @@ import type {
   SpeechToText,
   TextToSpeech,
   AIBackend,
+  DualResponse,
   UserAudioStream,
 } from "../../src/core/interfaces.js";
 
@@ -48,7 +49,7 @@ describe("Pipeline", () => {
     transport = createMockTransport();
     stt = { transcribe: vi.fn().mockResolvedValue("hello world") };
     tts = { synthesize: vi.fn().mockResolvedValue(Buffer.from("audio-data")) };
-    ai = { chat: vi.fn().mockResolvedValue("Hi there!") };
+    ai = { chat: vi.fn().mockResolvedValue({ text: "Hi there!", voice: "Hi there!" }) };
   });
 
   it("runs the full pipeline: audio → STT → AI → TTS → playback", async () => {
@@ -77,7 +78,7 @@ describe("Pipeline", () => {
     expect(transport._playedAudio).toHaveLength(1);
     expect(transport._playedAudio[0]).toEqual(Buffer.from("audio-data"));
     expect(onTranscription).toHaveBeenCalledWith("user-1", "hello world");
-    expect(onAIResponse).toHaveBeenCalledWith("Hi there!");
+    expect(onAIResponse).toHaveBeenCalledWith({ text: "Hi there!", voice: "Hi there!" });
   });
 
   it("skips processing when transcription is empty", async () => {
@@ -94,7 +95,7 @@ describe("Pipeline", () => {
   });
 
   it("skips processing when AI response is empty", async () => {
-    (ai.chat as ReturnType<typeof vi.fn>).mockResolvedValue("");
+    (ai.chat as ReturnType<typeof vi.fn>).mockResolvedValue({ text: "", voice: "" });
 
     const pipeline = new Pipeline({ transport, stt, tts, ai });
     pipeline.start();
@@ -303,5 +304,92 @@ describe("Pipeline", () => {
     });
 
     expect(stt.transcribe).not.toHaveBeenCalled();
+  });
+
+  describe("dual response", () => {
+    it("sends voice variant to TTS and both variants to onAIResponse", async () => {
+      (ai.chat as ReturnType<typeof vi.fn>).mockResolvedValue({
+        text: "Here is the detailed explanation with code...",
+        voice: "Here's a quick summary.",
+      });
+
+      const onAIResponse = vi.fn();
+      const pipeline = new Pipeline({
+        transport,
+        stt,
+        tts,
+        ai,
+        onAIResponse,
+      });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await pipeline.handleUserAudio({ userId: "u1", audioStream: stream });
+
+      expect(tts.synthesize).toHaveBeenCalledWith("Here's a quick summary.");
+      expect(onAIResponse).toHaveBeenCalledWith({
+        text: "Here is the detailed explanation with code...",
+        voice: "Here's a quick summary.",
+      });
+    });
+
+    it("calls sendToTextChannel with text variant when available", async () => {
+      (ai.chat as ReturnType<typeof vi.fn>).mockResolvedValue({
+        text: "detailed response",
+        voice: "brief response",
+      });
+
+      const sendToTextChannel = vi.fn().mockResolvedValue(undefined);
+      const transportWithText = {
+        ...createMockTransport(),
+        sendToTextChannel,
+      };
+
+      const pipeline = new Pipeline({
+        transport: transportWithText,
+        stt,
+        tts,
+        ai,
+      });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await pipeline.handleUserAudio({ userId: "u1", audioStream: stream });
+
+      expect(sendToTextChannel).toHaveBeenCalledWith("detailed response");
+    });
+
+    it("uses text for TTS when voice is empty", async () => {
+      (ai.chat as ReturnType<typeof vi.fn>).mockResolvedValue({
+        text: "only text available",
+        voice: "",
+      });
+
+      const pipeline = new Pipeline({ transport, stt, tts, ai });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await pipeline.handleUserAudio({ userId: "u1", audioStream: stream });
+
+      expect(tts.synthesize).toHaveBeenCalledWith("only text available");
+    });
+
+    it("skips sendToTextChannel when not defined on transport", async () => {
+      (ai.chat as ReturnType<typeof vi.fn>).mockResolvedValue({
+        text: "detailed",
+        voice: "brief",
+      });
+
+      // transport does not have sendToTextChannel - should not throw
+      const pipeline = new Pipeline({ transport, stt, tts, ai });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await expect(
+        pipeline.handleUserAudio({ userId: "u1", audioStream: stream })
+      ).resolves.toBeUndefined();
+
+      expect(tts.synthesize).toHaveBeenCalledWith("brief");
+    });
   });
 });

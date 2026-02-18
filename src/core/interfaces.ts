@@ -28,8 +28,8 @@ export interface VoiceTransport {
   /** Whether the transport is currently connected. */
   isConnected(): boolean;
 
-  /** Send a text message to the configured text channel. */
-  sendToTextChannel?(text: string): Promise<void>;
+  /** Send a text message to the associated text channel (optional). */
+  sendToTextChannel?(message: string): Promise<void>;
 }
 
 /**
@@ -47,8 +47,17 @@ export interface TextToSpeech {
 }
 
 /**
- * AI backend: takes user text, returns AI response text.
+ * Dual response from an AI backend: detailed text for text channels
+ * and a concise voice-friendly variant for TTS.
+ */
+export interface DualResponse {
+  text: string;
+  voice: string;
+}
+
+/**
+ * AI backend: takes user text, returns AI response with both text and voice variants.
  */
 export interface AIBackend {
-  chat(userMessage: string): Promise<string>;
+  chat(userMessage: string): Promise<DualResponse>;
 }

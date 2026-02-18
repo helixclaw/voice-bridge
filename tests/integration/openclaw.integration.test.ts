@@ -20,7 +20,7 @@ describe("OpenClawAI integration", () => {
     const ai = new OpenClawAI({ gatewayUrl: mock.url, token: TOKEN });
     const result = await ai.chat("hi there");
 
-    expect(result).toBe("Hello from mock AI!");
+    expect(result).toEqual({ text: "Hello from mock AI!", voice: "Hello from mock AI!" });
   });
 
   it("sends correct Authorization Bearer header", async () => {

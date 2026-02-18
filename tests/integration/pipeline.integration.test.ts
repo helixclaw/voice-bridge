@@ -106,7 +106,7 @@ describe("Pipeline integration (all mock servers)", () => {
 
     // Verify callbacks
     expect(onTranscription).toHaveBeenCalledWith("test-user", "what is the weather");
-    expect(onAIResponse).toHaveBeenCalledWith("It's sunny today!");
+    expect(onAIResponse).toHaveBeenCalledWith({ text: "It's sunny today!", voice: "It's sunny today!" });
   });
 
   it("STT failure propagation", async () => {

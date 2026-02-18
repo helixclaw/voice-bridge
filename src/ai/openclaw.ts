@@ -1,4 +1,4 @@
-import type { AIBackend } from "../core/interfaces.js";
+import type { AIBackend, DualResponse } from "../core/interfaces.js";
 
 export interface OpenClawConfig {
   /** Gateway URL (e.g. http://host.docker.internal:18789) */
@@ -9,6 +9,7 @@ export interface OpenClawConfig {
 
 interface WebhookResponse {
   text?: string;
+  voice?: string;
   error?: string;
 }
 
@@ -40,7 +41,7 @@ export class OpenClawAI implements AIBackend {
     this.userId = userId;
   }
 
-  async chat(userMessage: string): Promise<string> {
+  async chat(userMessage: string): Promise<DualResponse> {
     const response = await fetch(`${this.gatewayUrl}/webhook/voice-bridge`, {
       method: "POST",
       headers: {
@@ -65,6 +66,9 @@ export class OpenClawAI implements AIBackend {
     if (result.error) {
       throw new Error(`OpenClaw error: ${result.error}`);
     }
-    return result.text?.trim() ?? "";
+
+    const text = result.text?.trim() ?? "";
+    const voice = result.voice?.trim() || text;
+    return { text, voice };
   }
 }

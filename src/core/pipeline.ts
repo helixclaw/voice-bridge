@@ -5,6 +5,7 @@ import type {
   SpeechToText,
   TextToSpeech,
   AIBackend,
+  DualResponse,
   UserAudioStream,
 } from "./interfaces.js";
 
@@ -15,7 +16,7 @@ export interface PipelineConfig {
   ai: AIBackend;
   debugAudioDir?: string;
   onTranscription?: (userId: string, text: string) => void;
-  onAIResponse?: (text: string) => void;
+  onAIResponse?: (response: DualResponse) => void;
   onError?: (error: Error) => void;
 }
 
@@ -30,7 +31,7 @@ export class Pipeline {
   private readonly tts: TextToSpeech;
   private readonly ai: AIBackend;
   private readonly onTranscription?: (userId: string, text: string) => void;
-  private readonly onAIResponse?: (text: string) => void;
+  private readonly onAIResponse?: (response: DualResponse) => void;
   private readonly onError?: (error: Error) => void;
   private readonly debugAudioDir?: string;
   private busy = false;
@@ -116,11 +117,14 @@ export class Pipeline {
     this.onTranscription?.(userAudio.userId, transcription);
 
     const aiResponse = await this.ai.chat(transcription);
-    if (!aiResponse.trim()) return;
+    const text = aiResponse.text.trim();
+    const voice = aiResponse.voice.trim();
+    if (!voice && !text) return;
 
-    this.onAIResponse?.(aiResponse);
+    this.onAIResponse?.({ text, voice });
+    if (text) await this.transport.sendToTextChannel?.(text);
 
-    const speechAudio = await this.tts.synthesize(aiResponse);
+    const speechAudio = await this.tts.synthesize(voice || text);
     await this.transport.playAudio(speechAudio);
   }
 

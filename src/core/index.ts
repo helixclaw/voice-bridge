@@ -3,6 +3,7 @@ export type {
   SpeechToText,
   TextToSpeech,
   AIBackend,
+  DualResponse,
   UserAudioStream,
 } from "./interfaces.js";
 

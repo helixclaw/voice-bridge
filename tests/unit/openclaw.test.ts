@@ -12,11 +12,12 @@ describe("OpenClawAI", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("sends transcription to gateway webhook and returns response", async () => {
+  it("sends transcription to gateway webhook and returns dual response", async () => {
     const mockResponse = {
       ok: true,
       json: vi.fn().mockResolvedValue({
         text: "  Hello!  ",
+        voice: "  Hi!  ",
       }),
     };
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -29,7 +30,7 @@ describe("OpenClawAI", () => {
     });
     const result = await ai.chat("hi");
 
-    expect(result).toBe("Hello!");
+    expect(result).toEqual({ text: "Hello!", voice: "Hi!" });
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "http://localhost:18789/webhook/voice-bridge",
       expect.objectContaining({
@@ -60,7 +61,7 @@ describe("OpenClawAI", () => {
 
     const mockResponse = {
       ok: true,
-      json: vi.fn().mockResolvedValue({ text: "ok" }),
+      json: vi.fn().mockResolvedValue({ text: "ok", voice: "ok" }),
     };
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       mockResponse
@@ -80,6 +81,26 @@ describe("OpenClawAI", () => {
 
     expect(firstBody.sessionId).not.toBe(secondBody.sessionId);
     vi.useRealTimers();
+  });
+
+  it("falls back to text for voice when voice field is absent from webhook", async () => {
+    const mockResponse = {
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        text: "  Detailed answer  ",
+      }),
+    };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockResponse
+    );
+
+    const ai = new OpenClawAI({
+      gatewayUrl: "http://localhost:18789",
+      token: "test-token",
+    });
+    const result = await ai.chat("hi");
+
+    expect(result).toEqual({ text: "Detailed answer", voice: "Detailed answer" });
   });
 
   it("throws on non-ok response", async () => {
