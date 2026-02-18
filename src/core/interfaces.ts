@@ -25,11 +25,11 @@ export interface VoiceTransport {
   /** Play an audio buffer back into the voice channel. */
   playAudio(audio: Buffer): Promise<void>;
 
+  /** Optional: send a text message to an associated text channel. */
+  sendToTextChannel?(message: string): Promise<void>;
+
   /** Whether the transport is currently connected. */
   isConnected(): boolean;
-
-  /** Send a text message to the associated text channel (optional). */
-  sendToTextChannel?(message: string): Promise<void>;
 }
 
 /**

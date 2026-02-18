@@ -165,6 +165,8 @@ describe("Pipeline integration (all mock servers)", () => {
     const ai = new OpenClawAI({ gatewayUrl: openclawMock.url, token: TOKEN });
 
     const onError = vi.fn();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const pipeline = new Pipeline({ transport, stt, tts, ai, onError });
     pipeline.start();
 
@@ -172,9 +174,16 @@ describe("Pipeline integration (all mock servers)", () => {
     transport._handler?.({ userId: "test-user", audioStream });
 
     await new Promise((r) => setTimeout(r, 100));
-    expect(onError).toHaveBeenCalled();
-    expect(onError.mock.calls[0][0].message).toContain("500");
+    // onError is called when TTS fails and no text channel is available
+    expect(onError).toHaveBeenCalledWith(expect.any(Error));
+    // No text channel configured, so a warning is logged with the response text
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("No text channel configured")
+    );
+    expect(transport._playedAudio).toHaveLength(0);
 
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
     piperMock.clearError();
   });
 });

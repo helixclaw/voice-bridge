@@ -78,7 +78,7 @@ describe("DiscordTransport text channel methods", () => {
       const transport = new DiscordTransport({ client: mockClient });
 
       await expect(transport.sendToTextChannel("hello")).rejects.toThrow(
-        "No text channel ID configured"
+        "No text channel available for fallback"
       );
     });
   });

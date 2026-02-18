@@ -10,11 +10,16 @@ import type {
   UserAudioStream,
 } from "../../src/core/interfaces.js";
 
-function createMockTransport(): VoiceTransport & {
+function createMockTransport(options?: {
+  sendToTextChannel?: ReturnType<typeof vi.fn>;
+}): VoiceTransport & {
   _handler: ((ua: UserAudioStream) => void) | null;
   _playedAudio: Buffer[];
 } {
-  return {
+  const base: VoiceTransport & {
+    _handler: ((ua: UserAudioStream) => void) | null;
+    _playedAudio: Buffer[];
+  } = {
     _handler: null,
     _playedAudio: [],
     join: vi.fn().mockResolvedValue(undefined),
@@ -27,6 +32,10 @@ function createMockTransport(): VoiceTransport & {
     },
     isConnected: vi.fn().mockReturnValue(true),
   };
+  if (options?.sendToTextChannel) {
+    base.sendToTextChannel = options.sendToTextChannel;
+  }
+  return base;
 }
 
 function createReadableFromBuffer(data: Buffer): Readable {
@@ -390,6 +399,141 @@ describe("Pipeline", () => {
       ).resolves.toBeUndefined();
 
       expect(tts.synthesize).toHaveBeenCalledWith("brief");
+    });
+  });
+
+  describe("TTS error handling", () => {
+    it("falls back to text channel when TTS synthesis fails", async () => {
+      const sendToTextChannel = vi.fn().mockResolvedValue(undefined);
+      const transportWithText = createMockTransport({ sendToTextChannel });
+      const failingTts = {
+        synthesize: vi.fn().mockRejectedValue(new Error("Piper down")),
+      };
+
+      const pipeline = new Pipeline({
+        transport: transportWithText,
+        stt,
+        tts: failingTts,
+        ai,
+      });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await pipeline.handleUserAudio({ userId: "user-1", audioStream: stream });
+
+      expect(failingTts.synthesize).toHaveBeenCalledWith("Hi there!");
+      expect(transportWithText._playedAudio).toHaveLength(0);
+      // Called once for normal text delivery, once for TTS fallback
+      expect(sendToTextChannel).toHaveBeenCalledWith("Hi there!");
+      expect(pipeline.isProcessing()).toBe(false);
+    });
+
+    it("falls back to text channel when playback fails", async () => {
+      const sendToTextChannel = vi.fn().mockResolvedValue(undefined);
+      const transportWithText = createMockTransport({ sendToTextChannel });
+      transportWithText.playAudio = vi
+        .fn()
+        .mockRejectedValue(new Error("Audio player error"));
+
+      const pipeline = new Pipeline({
+        transport: transportWithText,
+        stt,
+        tts,
+        ai,
+      });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await pipeline.handleUserAudio({ userId: "user-1", audioStream: stream });
+
+      expect(tts.synthesize).toHaveBeenCalledWith("Hi there!");
+      expect(sendToTextChannel).toHaveBeenCalledWith("Hi there!");
+    });
+
+    it("logs warning when TTS fails and no text channel configured", async () => {
+      const failingTts = {
+        synthesize: vi.fn().mockRejectedValue(new Error("Piper down")),
+      };
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const pipeline = new Pipeline({
+        transport,
+        stt,
+        tts: failingTts,
+        ai,
+      });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await pipeline.handleUserAudio({ userId: "user-1", audioStream: stream });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("No text channel configured")
+      );
+      expect(pipeline.isProcessing()).toBe(false);
+      warnSpy.mockRestore();
+    });
+
+    it("continues processing after TTS fallback", async () => {
+      const sendToTextChannel = vi.fn().mockResolvedValue(undefined);
+      const transportWithText = createMockTransport({ sendToTextChannel });
+      const ttsImpl = {
+        synthesize: vi
+          .fn()
+          .mockRejectedValueOnce(new Error("Piper down"))
+          .mockResolvedValueOnce(Buffer.from("audio-data")),
+      };
+
+      const pipeline = new Pipeline({
+        transport: transportWithText,
+        stt,
+        tts: ttsImpl,
+        ai,
+      });
+      pipeline.start();
+
+      // First call: TTS fails, falls back to text
+      const stream1 = createReadableFromBuffer(Buffer.from("audio1"));
+      await pipeline.handleUserAudio({ userId: "u1", audioStream: stream1 });
+
+      // Second call: normal pipeline succeeds
+      const stream2 = createReadableFromBuffer(Buffer.from("audio2"));
+      await pipeline.handleUserAudio({ userId: "u2", audioStream: stream2 });
+
+      expect(ttsImpl.synthesize).toHaveBeenCalledTimes(2);
+      expect(transportWithText._playedAudio).toHaveLength(1);
+      expect(pipeline.isProcessing()).toBe(false);
+    });
+
+    it("handles fallback itself failing gracefully", async () => {
+      const sendToTextChannel = vi
+        .fn()
+        .mockResolvedValueOnce(undefined) // normal text delivery succeeds
+        .mockRejectedValueOnce(new Error("Discord API error")); // TTS fallback fails
+      const transportWithText = createMockTransport({ sendToTextChannel });
+      const failingTts = {
+        synthesize: vi.fn().mockRejectedValue(new Error("Piper down")),
+      };
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const pipeline = new Pipeline({
+        transport: transportWithText,
+        stt,
+        tts: failingTts,
+        ai,
+      });
+      pipeline.start();
+
+      const stream = createReadableFromBuffer(Buffer.from("audio"));
+      await pipeline.handleUserAudio({ userId: "user-1", audioStream: stream });
+
+      expect(sendToTextChannel).toHaveBeenCalledTimes(2);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Text channel fallback also failed"),
+        expect.any(Error)
+      );
+      expect(pipeline.isProcessing()).toBe(false);
+      errorSpy.mockRestore();
     });
   });
 });

@@ -124,8 +124,32 @@ export class Pipeline {
     this.onAIResponse?.({ text, voice });
     if (text) await this.transport.sendToTextChannel?.(text);
 
-    const speechAudio = await this.tts.synthesize(voice || text);
-    await this.transport.playAudio(speechAudio);
+    const spokenText = voice || text;
+    try {
+      const speechAudio = await this.tts.synthesize(spokenText);
+      await this.transport.playAudio(speechAudio);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error(
+        `[TTS/Playback] Failed for text: "${spokenText.substring(0, 100)}"`,
+        error
+      );
+      if (this.transport.sendToTextChannel) {
+        try {
+          await this.transport.sendToTextChannel(spokenText);
+        } catch (fallbackErr) {
+          console.error(
+            "[TTS/Playback] Text channel fallback also failed:",
+            fallbackErr
+          );
+        }
+      } else {
+        console.warn(
+          `[TTS/Playback] No text channel configured — response lost: "${spokenText.substring(0, 200)}"`
+        );
+        this.onError?.(error);
+      }
+    }
   }
 
   /** Wrap raw 16-bit 16kHz mono PCM in a WAV header. */
