@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.js.map
+*.d.ts
+!vitest.config.ts
+.DS_Store
+debug-audio/

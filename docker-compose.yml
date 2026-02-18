@@ -1,0 +1,56 @@
+services:
+  voice-bridge:
+    build: .
+    env_file: .env
+    environment:
+      - DEBUG_AUDIO_DIR=/debug-audio
+    volumes:
+      - ./debug-audio:/debug-audio
+    depends_on:
+      whisper:
+        condition: service_healthy
+      piper:
+        condition: service_healthy
+    restart: unless-stopped
+
+  whisper:
+    image: ghcr.io/ggerganov/whisper.cpp:main
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        if [ ! -f /models/ggml-base.bin ]; then
+          echo "Downloading ggml-base.bin..."
+          wget -q -O /models/ggml-base.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+        fi
+        exec /app/build/bin/whisper-server --model /models/ggml-base.bin --host 0.0.0.0 --port 8080
+    volumes:
+      - whisper-models:/models
+    ports:
+      - "127.0.0.1:8082:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  piper:
+    build:
+      context: .
+      dockerfile: Dockerfile.piper
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - piper-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+
+volumes:
+  whisper-models:
+  piper-data:

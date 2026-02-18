@@ -1,0 +1,21 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update -qq && \
+    apt-get install -y -qq python3 wget && \
+    wget -q -O /tmp/piper_linux_x86_64.tar.gz \
+      https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz && \
+    tar -xzf /tmp/piper_linux_x86_64.tar.gz -C /usr/local/bin --strip-components=1 && \
+    rm /tmp/piper_linux_x86_64.tar.gz && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY piper-server.py /app/piper-server.py
+
+RUN mkdir -p /data && \
+    wget -q -O /data/en_US-lessac-medium.onnx \
+      https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx && \
+    wget -q -O /data/en_US-lessac-medium.onnx.json \
+      https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+
+EXPOSE 5000
+
+ENTRYPOINT ["python3", "/app/piper-server.py"]
