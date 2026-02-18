@@ -9,6 +9,8 @@
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "deploy-commands": "node dist/transports/discord/deploy-commands.js"
   },
