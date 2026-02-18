@@ -105,7 +105,7 @@ describe("Pipeline", () => {
     expect(tts.synthesize).not.toHaveBeenCalled();
   });
 
-  it("skips when already processing", async () => {
+  it("queues audio received during processing and processes it after", async () => {
     const slowSTT = {
       transcribe: vi.fn().mockImplementation(
         () => new Promise((resolve) => setTimeout(() => resolve("text"), 100))
@@ -130,12 +130,143 @@ describe("Pipeline", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(pipeline.isProcessing()).toBe(true);
 
+    // This should be queued, not dropped
     const p2 = pipeline.handleUserAudio({ userId: "u2", audioStream: stream2 });
 
     await Promise.all([p1, p2]);
 
-    // Only the first call should have gone through
-    expect(slowSTT.transcribe).toHaveBeenCalledTimes(1);
+    // Wait for the queued drain to complete (fire-and-forget)
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Both utterances should have been processed
+    expect(slowSTT.transcribe).toHaveBeenCalledTimes(2);
+    expect(transport._playedAudio).toHaveLength(2);
+  });
+
+  it("keeps only the most recent queued utterance (depth 1)", async () => {
+    const slowSTT = {
+      transcribe: vi.fn().mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve("text"), 100))
+      ),
+    };
+
+    const pipeline = new Pipeline({
+      transport,
+      stt: slowSTT,
+      tts,
+      ai,
+    });
+
+    pipeline.start();
+
+    const stream1 = createReadableFromBuffer(Buffer.from("audio1"));
+    const stream2 = createReadableFromBuffer(Buffer.from("audio2"));
+    const stream3 = createReadableFromBuffer(Buffer.from("audio3"));
+
+    const p1 = pipeline.handleUserAudio({ userId: "u1", audioStream: stream1 });
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(pipeline.isProcessing()).toBe(true);
+
+    // Queue stream2, then replace it with stream3
+    pipeline.handleUserAudio({ userId: "u2", audioStream: stream2 });
+    pipeline.handleUserAudio({ userId: "u3", audioStream: stream3 });
+
+    await p1;
+
+    // Wait for the queued item to also complete
+    await new Promise((r) => setTimeout(r, 250));
+
+    // stream1 + stream3 processed, stream2 was replaced
+    expect(slowSTT.transcribe).toHaveBeenCalledTimes(2);
+    // Verify stream3 was the one processed (not stream2)
+    expect(slowSTT.transcribe).toHaveBeenNthCalledWith(2, Buffer.from("audio3"));
+  });
+
+  it("drains queue even when first utterance hits early return", async () => {
+    const slowSTT = {
+      transcribe: vi.fn()
+        .mockImplementationOnce(
+          () => new Promise((resolve) => setTimeout(() => resolve(""), 100))
+        )
+        .mockImplementationOnce(
+          () => new Promise((resolve) => setTimeout(() => resolve("valid text"), 50))
+        ),
+    };
+
+    const pipeline = new Pipeline({
+      transport,
+      stt: slowSTT,
+      tts,
+      ai,
+    });
+
+    pipeline.start();
+
+    const stream1 = createReadableFromBuffer(Buffer.from("audio1"));
+    const stream2 = createReadableFromBuffer(Buffer.from("audio2"));
+
+    const p1 = pipeline.handleUserAudio({ userId: "u1", audioStream: stream1 });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Queue stream2 while stream1 is processing
+    pipeline.handleUserAudio({ userId: "u2", audioStream: stream2 });
+
+    await p1;
+
+    // Wait for queued item to complete
+    await new Promise((r) => setTimeout(r, 200));
+
+    // First call returned empty transcription (early return), but second still processed
+    expect(slowSTT.transcribe).toHaveBeenCalledTimes(2);
+    expect(ai.chat).toHaveBeenCalledTimes(1);
+    expect(ai.chat).toHaveBeenCalledWith("valid text");
+    expect(transport._playedAudio).toHaveLength(1);
+  });
+
+  it("resets processing state and drains queue after error", async () => {
+    const sttError = new Error("STT failure");
+    const slowSTT = {
+      transcribe: vi.fn()
+        .mockImplementationOnce(
+          () => new Promise((_, reject) => setTimeout(() => reject(sttError), 100))
+        )
+        .mockImplementationOnce(
+          () => new Promise((resolve) => setTimeout(() => resolve("text"), 50))
+        ),
+    };
+
+    const onError = vi.fn();
+    const pipeline = new Pipeline({
+      transport,
+      stt: slowSTT,
+      tts,
+      ai,
+      onError,
+    });
+
+    pipeline.start();
+
+    const stream1 = createReadableFromBuffer(Buffer.from("audio1"));
+    const stream2 = createReadableFromBuffer(Buffer.from("audio2"));
+
+    // Trigger via transport handler so onError gets called
+    transport._handler?.({ userId: "u1", audioStream: stream1 });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Queue stream2 while stream1 is processing
+    transport._handler?.({ userId: "u2", audioStream: stream2 });
+
+    // Wait for both to complete
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(onError).toHaveBeenCalledWith(sttError);
+    // Second utterance should still be processed despite first erroring
+    expect(slowSTT.transcribe).toHaveBeenCalledTimes(2);
+    expect(transport._playedAudio).toHaveLength(1);
+    expect(pipeline.isProcessing()).toBe(false);
   });
 
   it("calls onError when pipeline fails", async () => {

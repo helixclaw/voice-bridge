@@ -33,7 +33,8 @@ export class Pipeline {
   private readonly onAIResponse?: (text: string) => void;
   private readonly onError?: (error: Error) => void;
   private readonly debugAudioDir?: string;
-  private processing = false;
+  private busy = false;
+  private pendingAudio: UserAudioStream | null = null;
 
   constructor(config: PipelineConfig) {
     this.transport = config.transport;
@@ -57,53 +58,70 @@ export class Pipeline {
 
   /** Full pipeline: collect audio → STT → AI → TTS → playback. */
   async handleUserAudio(userAudio: UserAudioStream): Promise<void> {
-    if (this.processing) return;
-    this.processing = true;
+    if (this.busy) {
+      // Queue the latest utterance (depth 1 - replaces any previous pending)
+      this.pendingAudio = userAudio;
+      return;
+    }
+    this.busy = true;
 
     try {
-      const audioBuffer = await this.collectStream(userAudio.audioStream);
-      if (audioBuffer.length === 0) return;
-
-      // Save as WAV for debugging (playable directly)
-      if (this.debugAudioDir) {
-        try {
-          await mkdir(this.debugAudioDir, { recursive: true });
-          const ts = Date.now();
-          const wavBuffer = this.wrapInWav(audioBuffer);
-          const path = join(this.debugAudioDir, `${ts}_${userAudio.userId}.wav`);
-          await writeFile(path, wavBuffer);
-          console.log(`[debug] Saved ${audioBuffer.length} bytes of audio to ${path}`);
-        } catch (e) {
-          console.warn("[debug] Failed to save audio:", e);
-        }
-      }
-
-      const transcription = await this.stt.transcribe(audioBuffer);
-      if (!transcription.trim()) return;
-
-      // Filter whisper hallucinations on ambient noise
-      if (this.isNonSpeech(transcription)) {
-        console.log(`[STT] Filtered non-speech: "${transcription}"`);
-        return;
-      }
-
-      this.onTranscription?.(userAudio.userId, transcription);
-
-      const aiResponse = await this.ai.chat(transcription);
-      if (!aiResponse.trim()) return;
-
-      this.onAIResponse?.(aiResponse);
-
-      const speechAudio = await this.tts.synthesize(aiResponse);
-      await this.transport.playAudio(speechAudio);
+      await this.processAudio(userAudio);
     } finally {
-      this.processing = false;
+      this.busy = false;
+      // Drain queue: if audio arrived while we were busy, process it now
+      const next = this.pendingAudio;
+      this.pendingAudio = null;
+      if (next) {
+        this.handleUserAudio(next).catch((err) => {
+          this.onError?.(err instanceof Error ? err : new Error(String(err)));
+        });
+      }
     }
   }
 
   /** Whether the pipeline is currently processing audio. */
   isProcessing(): boolean {
-    return this.processing;
+    return this.busy;
+  }
+
+  /** Process a single audio utterance through the full pipeline. */
+  private async processAudio(userAudio: UserAudioStream): Promise<void> {
+    const audioBuffer = await this.collectStream(userAudio.audioStream);
+    if (audioBuffer.length === 0) return;
+
+    // Save as WAV for debugging (playable directly)
+    if (this.debugAudioDir) {
+      try {
+        await mkdir(this.debugAudioDir, { recursive: true });
+        const ts = Date.now();
+        const wavBuffer = this.wrapInWav(audioBuffer);
+        const path = join(this.debugAudioDir, `${ts}_${userAudio.userId}.wav`);
+        await writeFile(path, wavBuffer);
+        console.log(`[debug] Saved ${audioBuffer.length} bytes of audio to ${path}`);
+      } catch (e) {
+        console.warn("[debug] Failed to save audio:", e);
+      }
+    }
+
+    const transcription = await this.stt.transcribe(audioBuffer);
+    if (!transcription.trim()) return;
+
+    // Filter whisper hallucinations on ambient noise
+    if (this.isNonSpeech(transcription)) {
+      console.log(`[STT] Filtered non-speech: "${transcription}"`);
+      return;
+    }
+
+    this.onTranscription?.(userAudio.userId, transcription);
+
+    const aiResponse = await this.ai.chat(transcription);
+    if (!aiResponse.trim()) return;
+
+    this.onAIResponse?.(aiResponse);
+
+    const speechAudio = await this.tts.synthesize(aiResponse);
+    await this.transport.playAudio(speechAudio);
   }
 
   /** Wrap raw 16-bit 16kHz mono PCM in a WAV header. */
