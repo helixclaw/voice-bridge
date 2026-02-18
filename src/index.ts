@@ -17,12 +17,15 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
 });
 
 const transport = new DiscordTransport({
   listenUserId: config.discord.listenUserId,
+  client,
+  textChannelId: config.discord.textChannelId,
 });
 
 const stt = new WhisperSTT({ url: config.whisper.url });

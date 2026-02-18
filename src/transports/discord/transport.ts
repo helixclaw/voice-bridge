@@ -14,7 +14,7 @@ import {
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const prism = require("prism-media");
-import type { VoiceBasedChannel } from "discord.js";
+import type { Client, VoiceBasedChannel } from "discord.js";
 import type { VoiceTransport, UserAudioStream } from "../../core/interfaces.js";
 
 /**
@@ -51,6 +51,10 @@ class Downsampler extends Transform {
 export interface DiscordTransportOptions {
   /** Only listen to this user ID (optional — if unset, listens to all) */
   listenUserId?: string;
+  /** Discord.js Client instance for fetching channels */
+  client?: Client;
+  /** Text channel ID for sending text messages */
+  textChannelId?: string;
 }
 
 export class DiscordTransport implements VoiceTransport {
@@ -58,10 +62,14 @@ export class DiscordTransport implements VoiceTransport {
   private player: AudioPlayer | null = null;
   private audioHandler: ((userAudio: UserAudioStream) => void) | null = null;
   private readonly listenUserId?: string;
+  private readonly client?: Client;
+  private readonly textChannelId?: string;
   private subscribedUsers = new Set<string>();
 
   constructor(options: DiscordTransportOptions = {}) {
     this.listenUserId = options.listenUserId;
+    this.client = options.client;
+    this.textChannelId = options.textChannelId;
   }
 
   async join(channelId: string, channel?: VoiceBasedChannel): Promise<void> {
@@ -144,5 +152,29 @@ export class DiscordTransport implements VoiceTransport {
     return (
       (this.connection?.state.status === VoiceConnectionStatus.Ready) || false
     );
+  }
+
+  private async sendTextMessage(channelId: string, content: string): Promise<void> {
+    if (!this.client) {
+      throw new Error("No Discord client provided — cannot send text messages");
+    }
+
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel) {
+      throw new Error(`Channel not found: ${channelId}`);
+    }
+    if (!channel.isTextBased() || !("send" in channel)) {
+      throw new Error(`Channel ${channelId} is not a text-based channel`);
+    }
+
+    await (channel as { send: (content: string) => Promise<unknown> }).send(content);
+  }
+
+  async sendToTextChannel(content: string): Promise<void> {
+    if (!this.textChannelId) {
+      throw new Error("No text channel ID configured (DISCORD_TEXT_CHANNEL_ID)");
+    }
+
+    await this.sendTextMessage(this.textChannelId, content);
   }
 }

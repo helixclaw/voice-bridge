@@ -16,6 +16,7 @@ export interface AppConfig {
     clientId: string;
     guildId: string;
     listenUserId?: string;
+    textChannelId?: string;
   };
   whisper: {
     url: string;
@@ -36,6 +37,7 @@ export function loadConfig(): AppConfig {
       clientId: requireEnv("DISCORD_CLIENT_ID"),
       guildId: requireEnv("DISCORD_GUILD_ID"),
       listenUserId: process.env["DISCORD_LISTEN_USER_ID"],
+      textChannelId: process.env["DISCORD_TEXT_CHANNEL_ID"],
     },
     whisper: {
       url: optionalEnv("WHISPER_URL", "http://whisper:8080"),

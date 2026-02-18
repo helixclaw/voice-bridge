@@ -27,6 +27,9 @@ export interface VoiceTransport {
 
   /** Whether the transport is currently connected. */
   isConnected(): boolean;
+
+  /** Send a text message to the configured text channel. */
+  sendToTextChannel?(text: string): Promise<void>;
 }
 
 /**
