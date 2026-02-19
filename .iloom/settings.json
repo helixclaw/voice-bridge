@@ -1,0 +1,7 @@
+{
+  "mainBranch": "main",
+  "colors": {
+    "terminal": true,
+    "vscode": true
+  }
+}
