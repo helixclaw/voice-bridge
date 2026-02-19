@@ -1,5 +1,9 @@
 {
   "mainBranch": "main",
+  "mergeBehavior": {
+    "mode": "github-draft-pr",
+    "autoCommitPush": true
+  },
   "colors": {
     "terminal": true,
     "vscode": true
